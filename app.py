@@ -1,7 +1,3 @@
-# 파일명: app.py
-# 지시사항: 서적 OCR 및 국회도서관 API 연동 웹 애플리케이션.
-# - 검색어 유사도 비교 시 대소문자를 무시하고(소문자 통일), 제목 끝에 붙는 슬래시(/) 등 특수기호를 제거하여 정확한 매칭과 정렬이 이루어지도록 calculate_similarity 함수를 개선함.
-
 import streamlit as st
 import google.generativeai as genai
 import requests
@@ -27,12 +23,10 @@ def calculate_similarity(query, title):
     if not query or not title:
         return 0
     
-    # 🔥 핵심 수정: 소문자로 통일하고 양끝의 불필요한 기호(/, -, 공백) 제거
     norm_query = query.lower().strip()
     norm_title = title.lower().strip(' /.-')
     
     score = 0
-    # 정규화된 텍스트로 비교
     if norm_query == norm_title:
         score += 1000
     elif norm_query in norm_title:
@@ -40,7 +34,6 @@ def calculate_similarity(query, title):
     elif norm_title in norm_query:
         score += 400
     
-    # 단어별 겹침도 소문자 기준으로 계산
     q_words = set(norm_query.split())
     t_words = set(norm_title.split())
     overlap = len(q_words.intersection(t_words))
@@ -64,10 +57,9 @@ model = genai.GenerativeModel('models/gemini-3-flash-preview')
 st.set_page_config(page_title="서적 OCR 정리", layout="wide", page_icon="📚")
 st.title("📚 서적 OCR 및 국회도서관 검색")
 
+# 썸네일 CSS 주입
 st.markdown("""
     <style>
-    [data-testid="stCameraInput"] { width: 100% !important; max-width: 100% !important; }
-    [data-testid="stCameraInput"] video { width: 100% !important; height: auto !important; border-radius: 10px; }
     .thumb-container { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
     .thumb-item { border: 2px solid #ddd; border-radius: 5px; overflow: hidden; position: relative; }
     .thumb-item img { display: block; }
@@ -80,21 +72,19 @@ st.markdown("""
 if "image_data_store" not in st.session_state:
     st.session_state.image_data_store = {}
 
-if "camera_enabled" not in st.session_state:
-    st.session_state.camera_enabled = False
-
 if "ocr_list" not in st.session_state:
     st.session_state.ocr_list = []
 
 # ==========================================
-# 3. 입력 섹션 및 API 테스트 (탭 구성)
+# 3. 입력 섹션 및 API 테스트 (탭 통합)
 # ==========================================
-tab1, tab2, tab3 = st.tabs(["📁 사진 다중 업로드", "📸 카메라 촬영", "🔍 국회도서관 API 테스트"])
+# 기존 3개 탭에서 웹 카메라 탭을 삭제하고 2개로 줄였습니다.
+tab1, tab2 = st.tabs(["📸 사진 촬영 및 업로드", "🔍 국회도서관 API 테스트"])
 
 with tab1:
-    st.subheader("갤러리 업로드 (고화질 권장)")
-    st.info("휴대폰의 기본 카메라로 선명하게 촬영한 뒤 업로드하시면 인식률이 가장 좋습니다.")
-    uploaded_files = st.file_uploader("사진들을 선택하세요 (여러 장 가능)", 
+    st.subheader("도서 사진 추가")
+    st.info("💡 **모바일 팁**: 아래 버튼을 누르고 **[카메라]**를 선택해 고화질로 바로 촬영하거나, 갤러리에서 기존 사진을 고를 수 있습니다. (촬영한 사진은 갤러리에 남지 않습니다)")
+    uploaded_files = st.file_uploader("사진을 선택하거나 촬영하세요 (여러 장 가능)", 
                                       type=['jpg', 'jpeg', 'png'], 
                                       accept_multiple_files=True)
     if uploaded_files:
@@ -103,28 +93,6 @@ with tab1:
         st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
 
 with tab2:
-    st.subheader("실시간 촬영")
-    col_btn1, col_btn2 = st.columns(2)
-    
-    with col_btn1:
-        if not st.session_state.camera_enabled:
-            if st.button("📷 카메라 시작", use_container_width=True):
-                st.session_state.camera_enabled = True
-                st.rerun()
-    
-    with col_btn2:
-        if st.session_state.camera_enabled:
-            if st.button("❌ 카메라 종료", use_container_width=True, type="primary"):
-                st.session_state.camera_enabled = False
-                st.rerun()
-                
-    if st.session_state.camera_enabled:
-        cam_file = st.camera_input("책장을 정면에서 촬영해주세요")
-        if cam_file:
-            st.session_state.image_data_store["camera_shot.jpg"] = cam_file.getvalue()
-            st.success("사진이 촬영되어 분석 대기열에 추가되었습니다.")
-
-with tab3:
     st.subheader("🔍 국회도서관 API 검색 테스트")
     st.write("유사도 정렬이 적용된 API 원본 응답을 확인합니다.")
     
@@ -301,7 +269,7 @@ if st.session_state.image_data_store:
                             unique_books.append(b)
                             seen_titles.add(b["title"])
                     
-                    unique_books = unique_books[:3]
+                    unique_books = unique_books[:1]
                     
                     display_titles = "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음"
                     display_authors = "\n".join([b["author"] for b in unique_books]) if unique_books else "정보 없음"
