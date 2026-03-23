@@ -1,6 +1,8 @@
 """
 파일명: app.py
-지시사항: 사진 다중 업로드 기능을 첫 번째 탭으로 배치하고, 카메라 촬영을 두 번째 탭으로 이동합니다. 세 번째 탭에는 국회도서관 API를 단독으로 테스트할 수 있는 검색 기능을 추가하여 통합합니다.
+지시사항: 서적 OCR 및 국회도서관 API 연동 웹 애플리케이션. 
+- 사진 다중 업로드(탭1), 카메라 촬영(탭2), API 단독 테스트(탭3) 기능 지원.
+- 검색 결과 요약표에서 불필요한 독음 컬럼을 제거하고, 소장 자료가 있는 행은 연한 노란색으로 하이라이트 처리함.
 """
 
 import streamlit as st
@@ -12,6 +14,17 @@ import pandas as pd
 import json
 from PIL import Image
 import io
+import re
+
+# ==========================================
+# 0. 텍스트 정제 헬퍼 함수
+# ==========================================
+def clean_html_tags(text):
+    if not text:
+        return ""
+    clean_text = re.sub(r'<[^>]+>', '', text)
+    clean_text = clean_text.replace('<![CDATA[', '').replace(']]>', '')
+    return clean_text.strip()
 
 # ==========================================
 # 1. 초기 설정 및 보안 (Secrets)
@@ -29,7 +42,6 @@ model = genai.GenerativeModel('models/gemini-3-flash-preview')
 st.set_page_config(page_title="서적 OCR 정리", layout="wide", page_icon="📚")
 st.title("📚 서적 OCR 및 국회도서관 검색")
 
-# 카메라 UI 크기 개선 및 썸네일 CSS 주입
 st.markdown("""
     <style>
     [data-testid="stCameraInput"] { width: 100% !important; max-width: 100% !important; }
@@ -55,10 +67,8 @@ if "ocr_list" not in st.session_state:
 # ==========================================
 # 3. 입력 섹션 및 API 테스트 (탭 구성)
 # ==========================================
-# 첫 번째 탭으로 사진 업로드를 배치합니다.
 tab1, tab2, tab3 = st.tabs(["📁 사진 다중 업로드", "📸 카메라 촬영", "🔍 국회도서관 API 테스트"])
 
-# --- 탭 1: 사진 다중 업로드 (메인 권장 기능) ---
 with tab1:
     st.subheader("갤러리 업로드 (고화질 권장)")
     st.info("휴대폰의 기본 카메라로 선명하게 촬영한 뒤 업로드하시면 인식률이 가장 좋습니다.")
@@ -70,7 +80,6 @@ with tab1:
             st.session_state.image_data_store[f.name] = f.getvalue()
         st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
 
-# --- 탭 2: 카메라 촬영 ---
 with tab2:
     st.subheader("실시간 촬영")
     col_btn1, col_btn2 = st.columns(2)
@@ -93,7 +102,6 @@ with tab2:
             st.session_state.image_data_store["camera_shot.jpg"] = cam_file.getvalue()
             st.success("사진이 촬영되어 분석 대기열에 추가되었습니다.")
 
-# --- 탭 3: 국회도서관 API 단독 테스트 ---
 with tab3:
     st.subheader("🔍 국회도서관 API 검색 테스트")
     st.write("OCR 분석 없이 특정 도서가 API에서 어떻게 검색되는지 응답 구조를 확인해 보세요.")
@@ -115,7 +123,6 @@ with tab3:
                     
                     st.write(f"**검색 결과 총 건수 (total):** {total_count}건")
                     
-                    # 상세 데이터를 추출하여 표로 구성
                     test_results = []
                     records = root.findall('.//recode') + root.findall('.//record')
                     
@@ -125,7 +132,7 @@ with tab3:
                             name = item.findtext('name')
                             value = item.findtext('value')
                             if name:
-                                item_dict[name] = value if value else ""
+                                item_dict[name] = clean_html_tags(value) if value else ""
                         if item_dict:
                             test_results.append(item_dict)
                             
@@ -134,7 +141,6 @@ with tab3:
                     else:
                         st.warning("상세 정보(record/recode)가 없습니다.")
                     
-                    # 원본 XML을 예쁘게 출력
                     with st.expander("원본 XML 응답 보기"):
                         dom = xml.dom.minidom.parseString(res.content)
                         pretty_xml = dom.toprettyxml()
@@ -236,7 +242,7 @@ if st.session_state.image_data_store:
                     for record in records:
                         for item in record.findall('item'):
                             tag_name = item.findtext('name')
-                            tag_value = item.findtext('value')
+                            tag_value = clean_html_tags(item.findtext('value'))
                             
                             if tag_name in ["자료명", "논문명", "서명", "Main Title"]:
                                 if tag_value not in titles: titles.append(tag_value)
@@ -249,8 +255,8 @@ if st.session_state.image_data_store:
                     display_authors = "\n".join(authors) if authors else "정보 없음"
                     display_publishers = "\n".join(publishers) if publishers else "정보 없음"
                     
+                    # '내 책(독음)' 항목 삭제 적용
                     final_results.append({
-                        "내 책(독음)": row['display'],
                         "원문(한자)": row['original'],
                         "소장수": count,
                         "국회도서관 확인명": display_titles,
@@ -258,8 +264,8 @@ if st.session_state.image_data_store:
                         "발행처": display_publishers
                     })
                 except Exception:
+                    # '내 책(독음)' 항목 삭제 적용
                     final_results.append({
-                        "내 책(독음)": row['display'], 
                         "원문(한자)": row['original'], 
                         "소장수": "에러", 
                         "국회도서관 확인명": "-",
@@ -270,7 +276,19 @@ if st.session_state.image_data_store:
                 progress_bar.progress((i + 1) / len(unique_targets))
 
             st.subheader("✅ 검색 결과 요약")
-            st.dataframe(pd.DataFrame(final_results), use_container_width=True)
             
-            csv = pd.DataFrame(final_results).to_csv(index=False).encode('utf-8-sig')
+            # 검색 결과 DataFrame 생성
+            res_df = pd.DataFrame(final_results)
+            
+            # 소장수가 0이 아니고 에러가 아닌 행을 연한 노란색으로 칠하는 함수
+            def highlight_found(row):
+                if str(row['소장수']) not in ['0', '에러']:
+                    return ['background-color: #FFF9C4'] * len(row)
+                return [''] * len(row)
+            
+            # 스타일 적용 후 출력
+            styled_res_df = res_df.style.apply(highlight_found, axis=1)
+            st.dataframe(styled_res_df, use_container_width=True)
+            
+            csv = res_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("📥 결과를 CSV로 저장", data=csv, file_name="nal_search_result.csv", mime="text/csv")
