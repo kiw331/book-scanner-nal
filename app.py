@@ -1,12 +1,13 @@
 """
 파일명: app.py
-지시사항: 서적 OCR 및 국회도서관 API 연동 기능을 제공하는 Streamlit 웹 애플리케이션입니다. 카메라 제어, 다중 업로드, 썸네일 미리보기, 중복 체크 및 상세 도서 정보(다양한 제목, 저자, 발행자) 추출 기능이 포함되어 있습니다.
+지시사항: 사진 다중 업로드 기능을 첫 번째 탭으로 배치하고, 카메라 촬영을 두 번째 탭으로 이동합니다. 세 번째 탭에는 국회도서관 API를 단독으로 테스트할 수 있는 검색 기능을 추가하여 통합합니다.
 """
 
 import streamlit as st
 import google.generativeai as genai
 import requests
 import xml.etree.ElementTree as ET
+import xml.dom.minidom
 import pandas as pd
 import json
 from PIL import Image
@@ -52,11 +53,25 @@ if "ocr_list" not in st.session_state:
     st.session_state.ocr_list = []
 
 # ==========================================
-# 3. 이미지 입력 섹션 (탭 구성)
+# 3. 입력 섹션 및 API 테스트 (탭 구성)
 # ==========================================
-tab1, tab2 = st.tabs(["📸 카메라 촬영", "📁 사진 다중 업로드"])
+# 첫 번째 탭으로 사진 업로드를 배치합니다.
+tab1, tab2, tab3 = st.tabs(["📁 사진 다중 업로드", "📸 카메라 촬영", "🔍 국회도서관 API 테스트"])
 
+# --- 탭 1: 사진 다중 업로드 (메인 권장 기능) ---
 with tab1:
+    st.subheader("갤러리 업로드 (고화질 권장)")
+    st.info("휴대폰의 기본 카메라로 선명하게 촬영한 뒤 업로드하시면 인식률이 가장 좋습니다.")
+    uploaded_files = st.file_uploader("사진들을 선택하세요 (여러 장 가능)", 
+                                      type=['jpg', 'jpeg', 'png'], 
+                                      accept_multiple_files=True)
+    if uploaded_files:
+        for f in uploaded_files:
+            st.session_state.image_data_store[f.name] = f.getvalue()
+        st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
+
+# --- 탭 2: 카메라 촬영 ---
+with tab2:
     st.subheader("실시간 촬영")
     col_btn1, col_btn2 = st.columns(2)
     
@@ -78,15 +93,57 @@ with tab1:
             st.session_state.image_data_store["camera_shot.jpg"] = cam_file.getvalue()
             st.success("사진이 촬영되어 분석 대기열에 추가되었습니다.")
 
-with tab2:
-    st.subheader("갤러리 업로드")
-    uploaded_files = st.file_uploader("사진들을 선택하세요 (여러 장 가능)", 
-                                      type=['jpg', 'jpeg', 'png'], 
-                                      accept_multiple_files=True)
-    if uploaded_files:
-        for f in uploaded_files:
-            st.session_state.image_data_store[f.name] = f.getvalue()
-        st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
+# --- 탭 3: 국회도서관 API 단독 테스트 ---
+with tab3:
+    st.subheader("🔍 국회도서관 API 검색 테스트")
+    st.write("OCR 분석 없이 특정 도서가 API에서 어떻게 검색되는지 응답 구조를 확인해 보세요.")
+    
+    test_search_term = st.text_input("검색할 도서명/논문명을 입력하세요", placeholder="예: 의학입문")
+    
+    if st.button("API 검색 테스트", type="primary"):
+        if test_search_term:
+            with st.spinner("국회도서관 데이터를 불러오는 중..."):
+                params = {
+                    'ServiceKey': NAL_API_KEY,
+                    'search': f"자료명,{test_search_term}",
+                    'displaylines': 5
+                }
+                try:
+                    res = requests.get("http://apis.data.go.kr/9720000/searchservice/basic", params=params)
+                    root = ET.fromstring(res.content)
+                    total_count = root.findtext('total') or "0"
+                    
+                    st.write(f"**검색 결과 총 건수 (total):** {total_count}건")
+                    
+                    # 상세 데이터를 추출하여 표로 구성
+                    test_results = []
+                    records = root.findall('.//recode') + root.findall('.//record')
+                    
+                    for record in records:
+                        item_dict = {}
+                        for item in record.findall('item'):
+                            name = item.findtext('name')
+                            value = item.findtext('value')
+                            if name:
+                                item_dict[name] = value if value else ""
+                        if item_dict:
+                            test_results.append(item_dict)
+                            
+                    if test_results:
+                        st.dataframe(pd.DataFrame(test_results), use_container_width=True)
+                    else:
+                        st.warning("상세 정보(record/recode)가 없습니다.")
+                    
+                    # 원본 XML을 예쁘게 출력
+                    with st.expander("원본 XML 응답 보기"):
+                        dom = xml.dom.minidom.parseString(res.content)
+                        pretty_xml = dom.toprettyxml()
+                        st.code(pretty_xml, language="xml")
+                        
+                except Exception as e:
+                    st.error(f"API 호출 중 오류가 발생했습니다: {e}")
+        else:
+            st.warning("검색어를 입력해 주세요.")
 
 # ==========================================
 # 4. 이미지 미리보기 (Image Preview) 섹션
@@ -174,7 +231,6 @@ if st.session_state.image_data_store:
                     authors = []
                     publishers = []
                     
-                    # 'recode' 오타와 정상적인 'record' 태그를 모두 포괄하여 검색
                     records = root.findall('.//recode') + root.findall('.//record')
                     
                     for record in records:
@@ -182,7 +238,6 @@ if st.session_state.image_data_store:
                             tag_name = item.findtext('name')
                             tag_value = item.findtext('value')
                             
-                            # 여러 형태의 제목, 저자, 발행자 태그를 처리
                             if tag_name in ["자료명", "논문명", "서명", "Main Title"]:
                                 if tag_value not in titles: titles.append(tag_value)
                             elif tag_name in ["저자명", "저자", "Author"]:
