@@ -14,7 +14,7 @@ except Exception as e:
     print(f"❌ 설정 파일을 읽을 수 없습니다: {e}")
     exit()
 
-SEARCH_TERM = "Hemorheology and Hemodynamics" # 확인하고 싶은 검색어 (한자 또는 한글)
+SEARCH_TERM = "THE R BOOK" # 확인하고 싶은 검색어 (한자 또는 한글)
 
 # 2. API 호출
 url = "http://apis.data.go.kr/9720000/searchservice/basic"
