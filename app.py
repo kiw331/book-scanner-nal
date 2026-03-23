@@ -1,17 +1,10 @@
-"""
-파일명: app.py
-지시사항: Streamlit Cloud 배포용 코드입니다. 
-API 키는 소스코드에 적지 않고 Streamlit Secrets 기능을 활용합니다.
-"""
-
 import streamlit as st
 import google.generativeai as genai
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
 
-# 1. 보안 설정: Streamlit Secrets에서 키 불러오기
-# (배포 후 Streamlit Cloud 설정창에서 입력할 예정입니다)
+# 1. 보안 설정: Secrets에서 키 불러오기
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
     NAL_API_KEY = st.secrets["NAL_KEY"]
@@ -23,43 +16,56 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 st.set_page_config(page_title="한의학 서적 정리", layout="wide")
-st.title("📚 한의학 서적 정리 도우미")
+st.title("📚 한의학 서적 정리 및 국회도서관 검색")
 
-# 2. 카메라 입력 (모바일 크롬에서 작동)
-img_file = st.camera_input("책장을 정면에서 촬영해주세요")
+# --- 입력 방식 선택 (탭 또는 나란히 배치) ---
+tab1, tab2 = st.tabs(["📸 카메라 촬영", "📁 사진 업로드"])
 
-if img_file:
-    # OCR 수행 (한 번만 실행되도록 세션 상태 활용)
+with tab1:
+    cam_file = st.camera_input("책장을 찍어주세요")
+
+with tab2:
+    uploaded_file = st.file_uploader("갤러리에서 사진을 선택하세요", type=['jpg', 'jpeg', 'png'])
+
+# 두 입력 중 하나라도 있으면 해당 파일을 선택
+target_file = cam_file if cam_file is not None else uploaded_file
+
+# 새로운 사진이 들어오면 이전 OCR 결과 초기화
+if target_file:
+    # 파일명이 바뀌거나 새로운 데이터가 들어오면 세션 초기화
+    if "last_uploaded_file" not in st.session_state or st.session_state.last_uploaded_file != target_file.name:
+        if 'ocr_list' in st.session_state:
+            del st.session_state.ocr_list
+        st.session_state.last_uploaded_file = target_file.name
+
+    # 2. OCR 수행
     if 'ocr_list' not in st.session_state:
-        with st.spinner('Gemini가 한자를 읽고 있습니다...'):
-            img_data = img_file.getvalue()
-            # Gemini Vision 프로프프 설정
+        with st.spinner('Gemini가 책 제목을 분석 중입니다...'):
+            img_data = target_file.getvalue()
             prompt = "이 사진 속 책 제목들을 추출해줘. 세로쓰기를 고려해줘. 결과는 반드시 {'books': [{'original': '원문한자', 'display': '한글독음'}]} 형식의 JSON으로만 답해줘."
             response = model.generate_content([prompt, {'mime_type': 'image/jpeg', 'data': img_data}])
             
-            # JSON 텍스트만 추출하여 파싱 (정규표현식 대신 간단한 처리)
             try:
                 raw_text = response.text.replace('```json', '').replace('```', '').strip()
                 st.session_state.ocr_list = eval(raw_text)['books']
             except:
-                st.error("OCR 결과 해석에 실패했습니다. 다시 찍어보세요.")
+                st.error("OCR 해석 실패. 사진을 더 밝은 곳에서 다시 찍어보세요.")
                 st.stop()
 
-    # 3. 데이터 편집 (사용자 수정 단계)
-    st.subheader("📝 OCR 결과 확인 및 수정")
+    # 3. 데이터 편집 및 검색 (이전 로직 동일)
+    st.subheader("📝 추출된 도서 리스트 (수정 가능)")
     df = pd.DataFrame(st.session_state.ocr_list)
     edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
-    # 4. 국회도서관 검색
     if st.button("국회도서관 소장 여부 일괄 확인"):
         final_results = []
         progress_bar = st.progress(0)
         
         for i, row in edited_df.iterrows():
-            # 실제 API 호출 (가이드의 'recode' 오타 반영)
+            # 국회도서관 API 호출 [cite: 1, 3, 11]
             params = {
                 'ServiceKey': NAL_API_KEY,
-                'search': f"자료명, {row['original']}",
+                'search': f"자료명, {row['original']}", # 원문으로 검색 [cite: 159, 193]
                 'displaylines': 3
             }
             
@@ -68,8 +74,8 @@ if img_file:
                 root = ET.fromstring(res.content)
                 count = root.findtext('total') or "0"
                 
-                # 'recode' 태그 내 '자료명' 추출
-                first_book = "없음"
+                # 'recode' 태그와 '자료명' 항목 처리
+                first_book = "정보 없음"
                 records = root.findall('.//recode')
                 if records:
                     for item in records[0].findall('item'):
@@ -80,14 +86,16 @@ if img_file:
                 final_results.append({
                     "내 책": row['display'],
                     "소장수": count,
-                    "도서관 확인명": first_book
+                    "국회도서관 확인명": first_book
                 })
             except:
-                final_results.append({"내 책": row['display'], "소장수": "오류", "도서관 확인명": "-"})
+                final_results.append({"내 책": row['display'], "소장수": "에러", "국회도서관 확인명": "-"})
             
             progress_bar.progress((i + 1) / len(edited_df))
 
-        # 5. 최종 결과 표
-        st.subheader("✅ 최종 확인 리스트")
+        st.subheader("✅ 검색 결과 요약")
         st.dataframe(pd.DataFrame(final_results), use_container_width=True)
-        st.success("작업이 완료되었습니다!")
+        
+        # 엑셀/CSV 다운로드 기능 추가
+        csv_data = pd.DataFrame(final_results).to_csv(index=False).encode('utf-8-sig')
+        st.download_button("결과를 CSV로 저장하기", data=csv_data, file_name="book_search_result.csv", mime="text/csv")
