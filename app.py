@@ -1,8 +1,8 @@
 """
 파일명: app.py
 지시사항: 서적 OCR 및 국회도서관 API 연동 웹 애플리케이션입니다.
-- 검색 로직을 개선하여 원문과 완벽히 일치하거나, 띄어쓰기 및 대소문자를 고려하여 단어가 가장 많이 겹치는 결과가 상단에 오도록 유사도 정렬 알고리즘을 추가했습니다.
-- API 테스트 탭에서도 동일한 정렬 기준이 적용되어 가장 관련성 높은 데이터가 표 상단에 표시됩니다.
+- API 검색 건수를 100건으로 확대하여 검색 사각지대를 없앴습니다.
+- 유사도 점수 기반 정렬 후, 요약표가 너무 길어지는 것을 방지하기 위해 가장 정확도가 높은 상위 3개의 도서 정보만 화면에 출력하도록 필터링 로직(unique_books[:3])을 추가했습니다.
 """
 
 import streamlit as st
@@ -20,7 +20,6 @@ import re
 # 0. 헬퍼 함수 (텍스트 정제 및 유사도 계산)
 # ==========================================
 def clean_html_tags(text):
-    """HTML 태그와 CDATA 잔여물을 제거합니다."""
     if not text:
         return ""
     clean_text = re.sub(r'<[^>]+>', '', text)
@@ -28,30 +27,21 @@ def clean_html_tags(text):
     return clean_text.strip()
 
 def calculate_similarity(query, title):
-    """
-    검색어(query)와 결과 제목(title) 간의 유사도를 계산합니다.
-    1. 완전 일치 (최고점)
-    2. 부분 포함 (높은 점수)
-    3. 띄어쓰기 및 대소문자를 유지한 상태에서의 단어 겹침 수 (기본 점수)
-    """
     if not query or not title:
         return 0
     
     score = 0
-    # 1. 완전 일치
     if query == title:
         score += 1000
-    # 2. 부분 일치 (원문이 결과 제목에 포함되거나 그 반대)
     elif query in title:
         score += 500
     elif title in query:
         score += 400
     
-    # 3. 단어 겹침 (띄어쓰기 기준 분리, 대소문자 유지)
     q_words = set(query.split())
     t_words = set(title.split())
     overlap = len(q_words.intersection(t_words))
-    score += overlap * 10  # 겹치는 단어 1개당 10점
+    score += overlap * 10
     
     return score
 
@@ -143,7 +133,7 @@ with tab3:
                 params = {
                     'ServiceKey': NAL_API_KEY,
                     'search': f"자료명,{test_search_term}",
-                    'displaylines': 20 # 더 많은 결과를 가져와서 정렬하기 위해 20으로 증가
+                    'displaylines': 100 # 100건으로 증가
                 }
                 try:
                     res = requests.get("http://apis.data.go.kr/9720000/searchservice/basic", params=params)
@@ -164,20 +154,16 @@ with tab3:
                             if name:
                                 clean_val = clean_html_tags(value) if value else ""
                                 item_dict[name] = clean_val
-                                # 제목 필드일 경우 유사도 계산을 위해 저장
                                 if name in ["자료명", "논문명", "서명", "Main Title"]:
                                     title_for_scoring = clean_val
                         
                         if item_dict:
-                            # 유사도 점수 계산 및 저장
                             item_dict["_score"] = calculate_similarity(test_search_term, title_for_scoring)
                             test_results.append(item_dict)
                             
                     if test_results:
-                        # 점수(유사도) 기준으로 내림차순 정렬
                         test_results.sort(key=lambda x: x["_score"], reverse=True)
                         
-                        # 표에 출력하기 전 내부 점수 필드 제거
                         for item in test_results:
                             item.pop("_score", None)
                             
@@ -218,7 +204,7 @@ if st.session_state.image_data_store:
                 st.error(f"{name} 로드 실패: {e}")
 
 # ==========================================
-# 5. 분석 및 결과 확인 (정렬 로직 추가)
+# 5. 분석 및 결과 확인
 # ==========================================
 if st.session_state.image_data_store:
     st.divider()
@@ -270,7 +256,7 @@ if st.session_state.image_data_store:
                 params = {
                     'ServiceKey': NAL_API_KEY,
                     'search': f"자료명, {search_query}",
-                    'displaylines': 20 # 풀을 넓히기 위해 20건 검색
+                    'displaylines': 100 # 100건 검색으로 풀 확대
                 }
                 
                 try:
@@ -295,7 +281,6 @@ if st.session_state.image_data_store:
                                 publisher = tag_value
                                 
                         if title:
-                            # 띄어쓰기, 대소문자 고려한 유사도 점수 산정
                             score = calculate_similarity(search_query, title)
                             found_books.append({
                                 "title": title, 
@@ -304,10 +289,8 @@ if st.session_state.image_data_store:
                                 "score": score
                             })
                     
-                    # 유사도가 높은 순으로 정렬
                     found_books.sort(key=lambda x: x["score"], reverse=True)
                     
-                    # 중복 데이터 제거 (이미 정렬되어 있으므로 가장 점수 높은 첫 데이터가 유지됨)
                     unique_books = []
                     seen_titles = set()
                     for b in found_books:
@@ -315,7 +298,9 @@ if st.session_state.image_data_store:
                             unique_books.append(b)
                             seen_titles.add(b["title"])
                     
-                    # 정렬된 순서대로 문자열 병합
+                    # 🔥 여기서 가장 유사도가 높은 상위 3개만 자름
+                    unique_books = unique_books[:3]
+                    
                     display_titles = "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음"
                     display_authors = "\n".join([b["author"] for b in unique_books]) if unique_books else "정보 없음"
                     display_publishers = "\n".join([b["publisher"] for b in unique_books]) if unique_books else "정보 없음"

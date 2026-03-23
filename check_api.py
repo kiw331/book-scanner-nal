@@ -21,7 +21,7 @@ url = "http://apis.data.go.kr/9720000/searchservice/basic"
 params = {
     'ServiceKey': NAL_API_KEY,
     'search': f"자료명,{SEARCH_TERM}",
-    'displaylines': 3
+    'displaylines': 100
 }
 
 print(f"🔍 검색어 '{SEARCH_TERM}'으로 API 호출 중...\n")
