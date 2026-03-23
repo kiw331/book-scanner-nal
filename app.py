@@ -13,7 +13,7 @@ except:
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('models/gemini-3-flash-preview')
 
 st.set_page_config(page_title="한의학 서적 정리", layout="wide")
 st.title("📚 한의학 서적 정리 및 국회도서관 검색")
