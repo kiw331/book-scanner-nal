@@ -1,9 +1,6 @@
-"""
-파일명: app.py
-지시사항: 서적 OCR 및 국회도서관 API 연동 웹 애플리케이션입니다.
-- API 검색 건수를 100건으로 확대하여 검색 사각지대를 없앴습니다.
-- 유사도 점수 기반 정렬 후, 요약표가 너무 길어지는 것을 방지하기 위해 가장 정확도가 높은 상위 3개의 도서 정보만 화면에 출력하도록 필터링 로직(unique_books[:3])을 추가했습니다.
-"""
+# 파일명: app.py
+# 지시사항: 서적 OCR 및 국회도서관 API 연동 웹 애플리케이션.
+# - 검색어 유사도 비교 시 대소문자를 무시하고(소문자 통일), 제목 끝에 붙는 슬래시(/) 등 특수기호를 제거하여 정확한 매칭과 정렬이 이루어지도록 calculate_similarity 함수를 개선함.
 
 import streamlit as st
 import google.generativeai as genai
@@ -30,16 +27,22 @@ def calculate_similarity(query, title):
     if not query or not title:
         return 0
     
+    # 🔥 핵심 수정: 소문자로 통일하고 양끝의 불필요한 기호(/, -, 공백) 제거
+    norm_query = query.lower().strip()
+    norm_title = title.lower().strip(' /.-')
+    
     score = 0
-    if query == title:
+    # 정규화된 텍스트로 비교
+    if norm_query == norm_title:
         score += 1000
-    elif query in title:
+    elif norm_query in norm_title:
         score += 500
-    elif title in query:
+    elif norm_title in norm_query:
         score += 400
     
-    q_words = set(query.split())
-    t_words = set(title.split())
+    # 단어별 겹침도 소문자 기준으로 계산
+    q_words = set(norm_query.split())
+    t_words = set(norm_title.split())
     overlap = len(q_words.intersection(t_words))
     score += overlap * 10
     
@@ -133,7 +136,7 @@ with tab3:
                 params = {
                     'ServiceKey': NAL_API_KEY,
                     'search': f"자료명,{test_search_term}",
-                    'displaylines': 100 # 100건으로 증가
+                    'displaylines': 100 
                 }
                 try:
                     res = requests.get("http://apis.data.go.kr/9720000/searchservice/basic", params=params)
@@ -256,7 +259,7 @@ if st.session_state.image_data_store:
                 params = {
                     'ServiceKey': NAL_API_KEY,
                     'search': f"자료명, {search_query}",
-                    'displaylines': 100 # 100건 검색으로 풀 확대
+                    'displaylines': 100 
                 }
                 
                 try:
@@ -298,7 +301,6 @@ if st.session_state.image_data_store:
                             unique_books.append(b)
                             seen_titles.add(b["title"])
                     
-                    # 🔥 여기서 가장 유사도가 높은 상위 3개만 자름
                     unique_books = unique_books[:3]
                     
                     display_titles = "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음"
