@@ -1,7 +1,8 @@
 """
 파일명: app.py
 지시사항: Streamlit 웹 애플리케이션의 메인 엔트리포인트입니다. 
-- OCR 추출 중 에러가 발생했을 때 화면 새로고침(st.rerun)을 막아 사용자가 에러 로그를 볼 수 있도록 로직을 개선했습니다.
+- 파일 업로더 초기화 오류(StreamlitValueAssignmentNotAllowedError)를 해결하기 위해 Dynamic Key를 도입했습니다.
+- 전체 삭제 및 개별 사진 삭제 기능이 정상적으로 동작하도록 로직을 수정했습니다.
 """
 import streamlit as st
 import google.generativeai as genai
@@ -50,8 +51,9 @@ if "ocr_list" not in st.session_state:
 if "search_results" not in st.session_state:
     st.session_state.search_results = None
 
-if "uploads" not in st.session_state:
-    st.session_state.uploads = None
+# 💡 위젯 초기화를 위한 동적 키(Dynamic Key) 추가
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
 
 # ==========================================
 # 3. 탭 구성 및 각 탭별 메인 로직
@@ -61,14 +63,16 @@ tab1, tab2 = st.tabs(["📸 사진 촬영 및 업로드", "🔍 국회도서관 
 with tab1:
     st.subheader("도서 사진 추가")
     st.info("💡 **모바일 팁**: 아래 버튼을 누르고 **[카메라]**를 선택해 고화질로 바로 촬영하거나, 갤러리에서 기존 사진을 고를 수 있습니다.")
+    
+    # 💡 파일 업로더에 동적 키를 연결
     uploaded_files = st.file_uploader("사진을 선택하거나 촬영하세요 (여러 장 가능)", 
                                       type=['jpg', 'jpeg', 'png'], 
                                       accept_multiple_files=True,
-                                      key="uploads")
+                                      key=f"uploads_{st.session_state.uploader_key}")
+    
     if uploaded_files:
         for f in uploaded_files:
             st.session_state.image_data_store[f.name] = f.getvalue()
-        st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
 
     # ==========================================
     # 4. 이미지 미리보기 (Image Preview) 
@@ -78,11 +82,13 @@ with tab1:
         st.subheader(f"🖼️ 분석 대기 중인 사진 ({len(st.session_state.image_data_store)}장)")
         
         if st.button("🗑️ 대기열 전체 삭제", type="secondary"):
-            st.session_state.image_data_store = {}
+            st.session_state.image_data_store.clear()
             st.session_state.ocr_list = []
             st.session_state.search_results = None 
-            st.session_state.uploads = None
             st.session_state.pop("last_files_hash", None)
+            
+            # 💡 업로더 위젯을 새로운 것으로 교체하기 위해 키 값을 1 증가시킴
+            st.session_state.uploader_key += 1 
             st.rerun()
 
         cols = st.columns(5)
@@ -93,13 +99,17 @@ with tab1:
                     st.image(img, caption=name, use_container_width=True)
                 except Exception as e:
                     st.error(f"{name} 로드 실패: {e}")
+                
+                # 개별 삭제 버튼
                 if st.button("사진 삭제", key=f"delete_{name}"):
                     st.session_state.image_data_store.pop(name, None)
                     st.session_state.ocr_list = []
                     st.session_state.search_results = None 
                     st.session_state.pop("last_files_hash", None)
-                    st.session_state.uploads = None
-                    st.experimental_rerun()
+                    
+                    # 💡 지운 사진이 파일 업로더에 의해 다시 추가되지 않도록 위젯 갱신
+                    st.session_state.uploader_key += 1 
+                    st.rerun() # 최신 문법으로 변경
 
     # ==========================================
     # 5. 분석 및 결과 확인 
@@ -115,10 +125,8 @@ with tab1:
         if not st.session_state.ocr_list:
             if st.button("🔍 도서 제목 분석 시작 (OCR)", type="primary", use_container_width=True):
                 progress_bar = st.progress(0)
-                # 추출 결과 받기
                 extracted_data = extract_books_from_images(model, st.session_state.image_data_store, progress_bar.progress)
                 
-                # 💡 핵심 수정 파트: 성공적으로 결과가 있을 때만 rerun
                 if extracted_data:
                     st.session_state.ocr_list = extracted_data
                     st.rerun()
@@ -199,7 +207,7 @@ with tab1:
 
 with tab2:
     st.subheader("🔍 국회도서관 API 검색 테스트")
-    st.write("유사도 정렬이 적용된 API 원본 응답을 확인합니다. (전처리 롤백 적용됨)")
+    st.write("유사도 정렬이 적용된 API 원본 응답을 확인합니다.")
     test_search_term = st.text_input("검색할 도서명/논문명을 입력하세요", placeholder="예: the R book")
     
     if st.button("API 검색 테스트", type="primary"):
