@@ -1,3 +1,10 @@
+"""
+파일명: app.py
+지시사항: 서적 OCR 및 국회도서관 API 연동 웹 애플리케이션입니다.
+- 특수문자(`「`, `」`, `&` 등)로 인한 국회도서관 API 검색 누락 문제를 해결하기 위해 정규화 함수(normalize_search_query)를 추가했습니다.
+- 검색어 및 API 반환 결과의 텍스트를 정규화하여 API 파라미터 전달 및 유사도 평가에 적용했습니다.
+"""
+
 import streamlit as st
 import google.generativeai as genai
 import requests
@@ -19,12 +26,23 @@ def clean_html_tags(text):
     clean_text = clean_text.replace('<![CDATA[', '').replace(']]>', '')
     return clean_text.strip()
 
+def normalize_search_query(query):
+    """검색어에서 한글, 영문, 숫자를 제외한 모든 특수문자를 공백으로 치환합니다."""
+    if not query:
+        return ""
+    # \w는 문자(한글, 영문, 숫자), [^\w\s]는 문자와 공백이 아닌 특수문자를 의미
+    clean_query = re.sub(r'[^\w\s]', ' ', query)
+    # 연속된 공백을 하나의 공백으로 압축
+    clean_query = re.sub(r'\s+', ' ', clean_query).strip()
+    return clean_query
+
 def calculate_similarity(query, title):
     if not query or not title:
         return 0
     
-    norm_query = query.lower().strip()
-    norm_title = title.lower().strip(' /.-')
+    # 유사도 비교 전 양쪽 모두 특수문자를 제거하고 소문자로 통일
+    norm_query = normalize_search_query(query).lower()
+    norm_title = normalize_search_query(title).lower()
     
     score = 0
     if norm_query == norm_title:
@@ -78,7 +96,6 @@ if "ocr_list" not in st.session_state:
 # ==========================================
 # 3. 입력 섹션 및 API 테스트 (탭 통합)
 # ==========================================
-# 기존 3개 탭에서 웹 카메라 탭을 삭제하고 2개로 줄였습니다.
 tab1, tab2 = st.tabs(["📸 사진 촬영 및 업로드", "🔍 국회도서관 API 테스트"])
 
 with tab1:
@@ -101,9 +118,11 @@ with tab2:
     if st.button("API 검색 테스트", type="primary"):
         if test_search_term:
             with st.spinner("국회도서관 데이터를 불러오는 중..."):
+                # 검색어 정규화 적용
+                normalized_term = normalize_search_query(test_search_term)
                 params = {
                     'ServiceKey': NAL_API_KEY,
-                    'search': f"자료명,{test_search_term}",
+                    'search': f"자료명,{normalized_term}",
                     'displaylines': 100 
                 }
                 try:
@@ -224,9 +243,12 @@ if st.session_state.image_data_store:
             progress_bar = st.progress(0)
             for i, (idx, row) in enumerate(unique_targets.iterrows()):
                 search_query = row['original']
+                # 특수문자를 공백으로 치환하여 API 검색
+                normalized_query = normalize_search_query(search_query)
+                
                 params = {
                     'ServiceKey': NAL_API_KEY,
-                    'search': f"자료명, {search_query}",
+                    'search': f"자료명, {normalized_query}",
                     'displaylines': 100 
                 }
                 
@@ -252,6 +274,7 @@ if st.session_state.image_data_store:
                                 publisher = tag_value
                                 
                         if title:
+                            # 정규화 로직이 내장된 calculate_similarity 사용
                             score = calculate_similarity(search_query, title)
                             found_books.append({
                                 "title": title, 
@@ -276,7 +299,7 @@ if st.session_state.image_data_store:
                     display_publishers = "\n".join([b["publisher"] for b in unique_books]) if unique_books else "정보 없음"
                     
                     final_results.append({
-                        "원문(한자)": search_query,
+                        "원문(한자)": search_query, # 표에는 보기 좋게 사용자의 원본 텍스트를 유지
                         "소장수": count,
                         "국회도서관 확인명": display_titles,
                         "저자": display_authors,
