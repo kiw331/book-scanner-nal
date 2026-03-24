@@ -1,17 +1,18 @@
-"""
-파일명: app.py
-지시사항: Streamlit 웹 애플리케이션의 메인 엔트리포인트입니다. 
-- 파일 업로더 초기화 오류(StreamlitValueAssignmentNotAllowedError)를 해결하기 위해 Dynamic Key를 도입했습니다.
-- 전체 삭제 및 개별 사진 삭제 기능이 정상적으로 동작하도록 로직을 수정했습니다.
-"""
+# 파일명: app.py
+# 지시사항: Streamlit 웹 애플리케이션 메인입니다.
+# (수정) zip 다운로드 방식을 제외하고 개별 다운로드 방식으로 변경했습니다. 
+# (수정) 검색 결과 표를 원본 OCR 행 개수와 동일하게 유지하고 '중복 행번호'를 계산하여 CSV 양식을 재구성했습니다.
+# (수정) 원본 이미지를 다운로드할 때 CSV의 인덱스 번호를 파일명에 매핑합니다. (예: nal[현재시간]_0_15.jpg)
+
 import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 from PIL import Image
 import io
 import xml.dom.minidom
+from datetime import datetime
 
-# 커스텀 모듈 임포트 (기존 3모듈 체제 유지)
+# 커스텀 모듈 임포트
 from modules.ocr_engine import extract_books_from_images
 from modules.nal_search import fetch_nal_data, parse_and_sort_nal_response
 
@@ -44,14 +45,10 @@ st.markdown("""
 # ==========================================
 if "image_data_store" not in st.session_state:
     st.session_state.image_data_store = {}
-
 if "ocr_list" not in st.session_state:
     st.session_state.ocr_list = []
-
 if "search_results" not in st.session_state:
     st.session_state.search_results = None
-
-# 💡 위젯 초기화를 위한 동적 키(Dynamic Key) 추가
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
@@ -64,7 +61,6 @@ with tab1:
     st.subheader("도서 사진 추가")
     st.info("💡 **모바일 팁**: 아래 버튼을 누르고 **[카메라]**를 선택해 고화질로 바로 촬영하거나, 갤러리에서 기존 사진을 고를 수 있습니다.")
     
-    # 💡 파일 업로더에 동적 키를 연결
     uploaded_files = st.file_uploader("사진을 선택하거나 촬영하세요 (여러 장 가능)", 
                                       type=['jpg', 'jpeg', 'png'], 
                                       accept_multiple_files=True,
@@ -86,8 +82,6 @@ with tab1:
             st.session_state.ocr_list = []
             st.session_state.search_results = None 
             st.session_state.pop("last_files_hash", None)
-            
-            # 💡 업로더 위젯을 새로운 것으로 교체하기 위해 키 값을 1 증가시킴
             st.session_state.uploader_key += 1 
             st.rerun()
 
@@ -100,16 +94,13 @@ with tab1:
                 except Exception as e:
                     st.error(f"{name} 로드 실패: {e}")
                 
-                # 개별 삭제 버튼
                 if st.button("사진 삭제", key=f"delete_{name}"):
                     st.session_state.image_data_store.pop(name, None)
                     st.session_state.ocr_list = []
                     st.session_state.search_results = None 
                     st.session_state.pop("last_files_hash", None)
-                    
-                    # 💡 지운 사진이 파일 업로더에 의해 다시 추가되지 않도록 위젯 갱신
                     st.session_state.uploader_key += 1 
-                    st.rerun() # 최신 문법으로 변경
+                    st.rerun()
 
     # ==========================================
     # 5. 분석 및 결과 확인 
@@ -137,22 +128,32 @@ with tab1:
             st.subheader("📝 추출된 도서 리스트 (편집 가능)")
             df = pd.DataFrame(st.session_state.ocr_list)
             
-            def highlight_dup(row):
-                return ['background-color: #FFCDD2' if row['상태'] == '⚠️ 중복' else '' for _ in row]
+            # 사용자에게는 source_image 컬럼을 숨김 처리
+            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, column_config={"source_image": None})
 
-            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+            if st.button("📚 국회도서관 소장 여부 확인 및 결과 생성", use_container_width=True):
+                # 1. 인덱스 초기화 및 중복 행번호 계산
+                work_df = edited_df.reset_index(drop=True)
+                work_df['행번호'] = work_df.index
+                
+                first_occurrences = work_df.drop_duplicates(subset=['original'], keep='first')
+                first_idx_map = dict(zip(first_occurrences['original'], first_occurrences['행번호']))
+                
+                def get_duplicate_marker(row):
+                    first_idx = first_idx_map.get(row['original'])
+                    return "" if row['행번호'] == first_idx else first_idx
+                
+                work_df['중복 행번호'] = work_df.apply(get_duplicate_marker, axis=1)
 
-            if st.button("📚 국회도서관 소장 여부 확인 (중복 제외 검색)", use_container_width=True):
-                final_results = []
-                unique_targets = edited_df.drop_duplicates(subset=['original'])
+                # 2. 중복을 제외한 원문만 API 검색
+                unique_queries = first_occurrences['original'].tolist()
+                nal_results_map = {}
                 
                 progress_bar = st.progress(0)
-                for i, (idx, row) in enumerate(unique_targets.iterrows()):
-                    search_query = row['original']
-                    
+                for i, query in enumerate(unique_queries):
                     try:
-                        xml_content = fetch_nal_data(NAL_API_KEY, search_query, displaylines=100)
-                        count, found_books = parse_and_sort_nal_response(xml_content, search_query)
+                        xml_content = fetch_nal_data(NAL_API_KEY, query, displaylines=100)
+                        count, found_books = parse_and_sort_nal_response(xml_content, query)
                         
                         unique_books = []
                         seen_titles = set()
@@ -160,50 +161,100 @@ with tab1:
                             if b["title"] not in seen_titles:
                                 unique_books.append(b)
                                 seen_titles.add(b["title"])
-                        
                         unique_books = unique_books[:1]
                         
-                        display_titles = "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음"
-                        display_authors = "\n".join([b["author"] for b in unique_books]) if unique_books else "정보 없음"
-                        display_publishers = "\n".join([b["publisher"] for b in unique_books]) if unique_books else "정보 없음"
-                        
-                        final_results.append({
-                            "원문(한자)": search_query,
+                        nal_results_map[query] = {
                             "소장수": count,
-                            "국회도서관 확인명": display_titles,
-                            "저자": display_authors,
-                            "발행처": display_publishers
-                        })
-                    except Exception as e: 
-                        print(f"[{search_query}] 검색 중 에러 발생: {e}") 
-                        final_results.append({
-                            "원문(한자)": search_query, 
-                            "소장수": "에러", 
-                            "국회도서관 확인명": "-",
-                            "저자": "-",
-                            "발행처": "-"
-                        })
+                            "국회도서관 확인명": "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음",
+                            "저자": "\n".join([b["author"] for b in unique_books]) if unique_books else "정보 없음",
+                            "발행처": "\n".join([b["publisher"] for b in unique_books]) if unique_books else "정보 없음"
+                        }
+                    except Exception as e:
+                        nal_results_map[query] = {"소장수": "에러", "국회도서관 확인명": "-", "저자": "-", "발행처": "-"}
                     
-                    progress_bar.progress((i + 1) / len(unique_targets))
+                    progress_bar.progress((i + 1) / len(unique_queries))
 
+                # 3. 전체 행(work_df)을 순회하며 최종 CSV용 데이터프레임 조립
+                final_results = []
+                for idx, row in work_df.iterrows():
+                    q = row['original']
+                    nal_data = nal_results_map.get(q, {})
+                    
+                    final_results.append({
+                        "원문": q,
+                        "번역": row.get('display', ''),
+                        "응답개수(소장수)": nal_data.get("소장수", "에러"),
+                        "국회도서관 확인명": nal_data.get("국회도서관 확인명", "-"),
+                        "저자": nal_data.get("저자", "-"),
+                        "발행처": nal_data.get("발행처", "-"),
+                        "중복 행번호": row['중복 행번호'],
+                        "비고": ""
+                    })
+
+                # 세션에 최종 결과와 인덱스 추적용 work_df 저장
                 st.session_state.search_results = final_results 
+                st.session_state.final_work_df = work_df
 
             if st.session_state.search_results is not None:
-                st.subheader("✅ 검색 결과 요약")
+                st.subheader("✅ 전체 분석 결과 (CSV 형식)")
                 
                 res_df = pd.DataFrame(st.session_state.search_results)
+                work_df = st.session_state.final_work_df
                 
+                # 색상 하이라이트 함수 (응답개수가 0이나 에러가 아닐 때 노란색)
                 def highlight_found(row):
-                    if str(row['소장수']) not in ['0', '에러']:
+                    if str(row['응답개수(소장수)']) not in ['0', '에러']:
                         return ['background-color: #FFF9C4'] * len(row)
                     return [''] * len(row)
                 
                 styled_res_df = res_df.style.apply(highlight_found, axis=1)
                 st.dataframe(styled_res_df, use_container_width=True)
                 
-                csv = res_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 결과를 CSV로 저장", data=csv, file_name="nal_search_result.csv", mime="text/csv")
-
+                # ==========================================
+                # 6. 다운로드 버튼 섹션 (결과 저장하기 & 사진)
+                # ==========================================
+                st.divider()
+                st.subheader("📥 다운로드")
+                
+                current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                # 1) CSV 다운로드 버튼
+                csv_bytes = res_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="결과 저장하기", 
+                    data=csv_bytes, 
+                    file_name=f"nal{current_time}_results.csv", 
+                    mime="text/csv",
+                    type="primary"
+                )
+                
+                st.markdown("#### 🖼️ 분석 원본 사진 다운로드")
+                st.write("각 사진이 담당한 CSV 행(Row) 번호가 파일명에 표기됩니다.")
+                
+                # 2) 이미지 개별 다운로드 버튼 (가로로 배치)
+                img_cols = st.columns(4)
+                col_idx = 0
+                
+                for img_name, img_bytes in st.session_state.image_data_store.items():
+                    # 해당 이미지가 생성한 데이터 인덱스(행번호) 찾기
+                    img_rows = work_df[work_df['source_image'] == img_name]
+                    
+                    if not img_rows.empty:
+                        start_idx = img_rows.index.min()
+                        end_idx = img_rows.index.max()
+                        new_img_name = f"nal{current_time}_{start_idx}_{end_idx}.jpg"
+                    else:
+                        # 이미지는 올렸으나 추출된 책이 없는 경우
+                        new_img_name = f"nal{current_time}_none_{img_name.split('.')[0]}.jpg"
+                    
+                    with img_cols[col_idx % 4]:
+                        st.download_button(
+                            label=f"⬇️ {new_img_name}",
+                            data=img_bytes,
+                            file_name=new_img_name,
+                            mime="image/jpeg"
+                        )
+                    col_idx += 1
 
 with tab2:
     st.subheader("🔍 국회도서관 API 검색 테스트")
