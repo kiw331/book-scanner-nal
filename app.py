@@ -1,3 +1,8 @@
+"""
+파일명: app.py
+지시사항: Streamlit 웹 애플리케이션의 메인 엔트리포인트입니다. 
+- OCR 추출 중 에러가 발생했을 때 화면 새로고침(st.rerun)을 막아 사용자가 에러 로그를 볼 수 있도록 로직을 개선했습니다.
+"""
 import streamlit as st
 import google.generativeai as genai
 import pandas as pd
@@ -5,7 +10,7 @@ from PIL import Image
 import io
 import xml.dom.minidom
 
-# 커스텀 모듈 임포트
+# 커스텀 모듈 임포트 (기존 3모듈 체제 유지)
 from modules.ocr_engine import extract_books_from_images
 from modules.nal_search import fetch_nal_data, parse_and_sort_nal_response
 
@@ -42,7 +47,6 @@ if "image_data_store" not in st.session_state:
 if "ocr_list" not in st.session_state:
     st.session_state.ocr_list = []
 
-# 💡 [추가] 검색 결과를 저장할 세션 추가
 if "search_results" not in st.session_state:
     st.session_state.search_results = None
 
@@ -63,7 +67,7 @@ with tab1:
         st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
 
     # ==========================================
-    # 4. 이미지 미리보기 (Image Preview) 섹션 (tab1 내부)
+    # 4. 이미지 미리보기 (Image Preview) 
     # ==========================================
     if st.session_state.image_data_store:
         st.divider()
@@ -72,7 +76,7 @@ with tab1:
         if st.button("🗑️ 대기열 전체 삭제", type="secondary"):
             st.session_state.image_data_store = {}
             st.session_state.ocr_list = []
-            st.session_state.search_results = None # 💡 대기열 지울 때 검색 결과도 초기화
+            st.session_state.search_results = None 
             st.rerun()
 
         cols = st.columns(5)
@@ -80,27 +84,33 @@ with tab1:
             with cols[i % 5]:
                 try:
                     img = Image.open(io.BytesIO(data))
-                    # img.thumbnail((200, 200))
                     st.image(img, caption=name, use_container_width=True)
                 except Exception as e:
                     st.error(f"{name} 로드 실패: {e}")
 
     # ==========================================
-    # 5. 분석 및 결과 확인 (tab1 내부)
+    # 5. 분석 및 결과 확인 
     # ==========================================
     if st.session_state.image_data_store:
         st.divider()
         current_files_hash = str(list(st.session_state.image_data_store.keys()))
         if "last_files_hash" not in st.session_state or st.session_state.last_files_hash != current_files_hash:
             st.session_state.ocr_list = []
-            st.session_state.search_results = None # 💡 사진 목록이 바뀌면 검색 결과도 초기화
+            st.session_state.search_results = None 
             st.session_state.last_files_hash = current_files_hash
 
         if not st.session_state.ocr_list:
             if st.button("🔍 도서 제목 분석 시작 (OCR)", type="primary", use_container_width=True):
                 progress_bar = st.progress(0)
-                st.session_state.ocr_list = extract_books_from_images(model, st.session_state.image_data_store, progress_bar.progress)
-                st.rerun()
+                # 추출 결과 받기
+                extracted_data = extract_books_from_images(model, st.session_state.image_data_store, progress_bar.progress)
+                
+                # 💡 핵심 수정 파트: 성공적으로 결과가 있을 때만 rerun
+                if extracted_data:
+                    st.session_state.ocr_list = extracted_data
+                    st.rerun()
+                else:
+                    st.warning("도서명을 추출하지 못했습니다. 화면에 표시된 에러 메시지를 확인해주세요.")
 
         if st.session_state.ocr_list:
             st.subheader("📝 추출된 도서 리스트 (편집 가능)")
@@ -130,7 +140,6 @@ with tab1:
                                 unique_books.append(b)
                                 seen_titles.add(b["title"])
                         
-                        # 모바일 가독성을 위해 상위 1개만 자름
                         unique_books = unique_books[:1]
                         
                         display_titles = "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음"
@@ -156,10 +165,8 @@ with tab1:
                     
                     progress_bar.progress((i + 1) / len(unique_targets))
 
-                # 💡 검색 완료 후 결과를 세션에 저장
                 st.session_state.search_results = final_results 
 
-            # 💡 버튼 클릭 블록 바깥으로 빼서 탭 이동 시에도 항상 그려주기
             if st.session_state.search_results is not None:
                 st.subheader("✅ 검색 결과 요약")
                 
