@@ -165,7 +165,8 @@ if st.session_state.image_data_store:
                         "저자": display_authors,
                         "발행처": display_publishers
                     })
-                except Exception:
+                except Exception as e: # <--- e를 받아서
+                    print(f"[{search_query}] 검색 중 에러 발생: {e}") # <--- 콘솔에 에러 출력
                     final_results.append({
                         "원문(한자)": search_query, 
                         "소장수": "에러", 

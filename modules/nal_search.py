@@ -5,11 +5,15 @@
 import requests
 import xml.etree.ElementTree as ET
 from modules.text_utils import clean_html_tags, calculate_similarity
+import re
 
 def fetch_nal_data(api_key, search_term, displaylines=100):
+    # 💡 [수정] API 전송 전 특수문자 제거 (영문, 숫자, 한글, 공백만 남김)
+    safe_search_term = re.sub(r'[^\w\s가-힣]', '', search_term)
+    
     params = {
         'ServiceKey': api_key,
-        'search': f"자료명,{search_term}",  # 전처리 롤백 (원문 그대로 전송)
+        'search': f"자료명,{safe_search_term}",  # 정제된 검색어로 전송
         'displaylines': displaylines 
     }
     response = requests.get("http://apis.data.go.kr/9720000/searchservice/basic", params=params)
