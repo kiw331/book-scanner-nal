@@ -4,6 +4,7 @@
 """
 import json
 import pandas as pd
+import streamlit as st  # 💡 [추가] Streamlit 모듈 불러오기
 
 def extract_books_from_images(model, image_data_store, progress_callback=None):
     all_books = []
@@ -17,8 +18,9 @@ def extract_books_from_images(model, image_data_store, progress_callback=None):
             raw_text = response.text.replace('```json', '').replace('```', '').strip()
             ocr_data = json.loads(raw_text)
             all_books.extend(ocr_data.get('books', []))
-        except Exception as e: # 💡 여기 'as e'가 꼭 들어가야 합니다!
-            print(f"❌ [{name}] OCR 처리 중 에러 발생: {e}")
+        except Exception as e:
+            # 💡 [수정] print 대신 웹 화면에 에러 메세지를 바로 띄웁니다!
+            st.error(f"❌ [{name}] OCR 처리 중 에러 발생: {e}")
             continue
         
         # 진행률 바 업데이트를 위한 콜백
