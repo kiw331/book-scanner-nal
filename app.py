@@ -10,7 +10,7 @@ import pandas as pd
 from PIL import Image
 import io
 import xml.dom.minidom
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # 커스텀 모듈 임포트
 from modules.ocr_engine import extract_books_from_images
@@ -178,7 +178,7 @@ with tab1:
                     final_results.append({
                         "원문": q,
                         "번역": row.get('display', ''),
-                        "응답개수(소장수)": nal_data.get("소장수", "에러"),
+                        "응답개수": nal_data.get("소장수", "에러"),
                         "국회도서관 확인명": nal_data.get("국회도서관 확인명", "-"),
                         "저자": nal_data.get("저자", "-"),
                         "발행처": nal_data.get("발행처", "-"),
@@ -209,10 +209,13 @@ with tab1:
                 st.divider()
                 st.subheader("📥 다운로드")
                 
-                # 💡 시간 형식 변경 적용 (마지막 % 제거)
-                current_time = datetime.now().strftime("%m%d%H%M")
-                
+
+                # 💡 2. 시간 계산 부분: 한국 시간(KST)으로 맞춰서 가져옵니다.
+                kst = timezone(timedelta(hours=9))
+                current_time = datetime.now(kst).strftime("%m%d%H%M")
                 csv_bytes = res_df.to_csv(index=False).encode('utf-8-sig')
+
+
                 st.download_button(
                     label="결과 저장하기", 
                     data=csv_bytes, 
