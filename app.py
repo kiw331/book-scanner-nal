@@ -80,7 +80,7 @@ with tab1:
             with cols[i % 5]:
                 try:
                     img = Image.open(io.BytesIO(data))
-                    img.thumbnail((200, 200))
+                    # img.thumbnail((200, 200))
                     st.image(img, caption=name, use_container_width=True)
                 except Exception as e:
                     st.error(f"{name} 로드 실패: {e}")
