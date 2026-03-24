@@ -1,8 +1,8 @@
 # 파일명: app.py
-# 지시사항: Streamlit 웹 애플리케이션 메인입니다.
-# (수정) zip 다운로드 방식을 제외하고 개별 다운로드 방식으로 변경했습니다. 
-# (수정) 검색 결과 표를 원본 OCR 행 개수와 동일하게 유지하고 '중복 행번호'를 계산하여 CSV 양식을 재구성했습니다.
-# (수정) 원본 이미지를 다운로드할 때 CSV의 인덱스 번호를 파일명에 매핑합니다. (예: nal[현재시간]_0_15.jpg)
+# 지시사항: 
+# 1. 파일 저장 시간 형식을 "%m%d%H%M" (월일시분)으로 변경.
+# 2. 개별 사진 삭제 버튼을 직관적인 ❌ 아이콘으로 변경하고 이미지 상단에 배치.
+# 3. Streamlit 환경의 한계를 고려하여 이미지와 겹치지는 않되 최대한 간결한 UI로 구성.
 
 import streamlit as st
 import google.generativeai as genai
@@ -31,14 +31,6 @@ model = genai.GenerativeModel('models/gemini-3-flash-preview')
 
 st.set_page_config(page_title="서적 OCR 정리", layout="wide", page_icon="📚")
 st.title("📚 서적 OCR 및 국회도서관 검색")
-
-st.markdown("""
-    <style>
-    .thumb-container { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-    .thumb-item { border: 2px solid #ddd; border-radius: 5px; overflow: hidden; position: relative; }
-    .thumb-item img { display: block; }
-    </style>
-    """, unsafe_allow_html=True)
 
 # ==========================================
 # 2. 세션 상태 관리 (초기화)
@@ -75,32 +67,39 @@ with tab1:
     # ==========================================
     if st.session_state.image_data_store:
         st.divider()
-        st.subheader(f"🖼️ 분석 대기 중인 사진 ({len(st.session_state.image_data_store)}장)")
         
-        if st.button("🗑️ 대기열 전체 삭제", type="secondary"):
-            st.session_state.image_data_store.clear()
-            st.session_state.ocr_list = []
-            st.session_state.search_results = None 
-            st.session_state.pop("last_files_hash", None)
-            st.session_state.uploader_key += 1 
-            st.rerun()
+        col_header1, col_header2 = st.columns([4, 1])
+        with col_header1:
+            st.subheader(f"🖼️ 분석 대기 중인 사진 ({len(st.session_state.image_data_store)}장)")
+        with col_header2:
+            if st.button("🗑️ 대기열 전체 삭제", type="secondary", use_container_width=True):
+                st.session_state.image_data_store.clear()
+                st.session_state.ocr_list = []
+                st.session_state.search_results = None 
+                st.session_state.pop("last_files_hash", None)
+                st.session_state.uploader_key += 1 
+                st.rerun()
 
         cols = st.columns(5)
         for i, (name, data) in enumerate(list(st.session_state.image_data_store.items())):
             with cols[i % 5]:
+                # 💡 사진 상단 우측에 ❌ 버튼 배치
+                btn_col1, btn_col2 = st.columns([3, 1])
+                with btn_col2:
+                    if st.button("❌", key=f"delete_{name}", help="이 사진 삭제"):
+                        st.session_state.image_data_store.pop(name, None)
+                        st.session_state.ocr_list = []
+                        st.session_state.search_results = None 
+                        st.session_state.pop("last_files_hash", None)
+                        st.session_state.uploader_key += 1 
+                        st.rerun()
+                
+                # 이미지 렌더링
                 try:
                     img = Image.open(io.BytesIO(data))
                     st.image(img, caption=name, use_container_width=True)
                 except Exception as e:
                     st.error(f"{name} 로드 실패: {e}")
-                
-                if st.button("사진 삭제", key=f"delete_{name}"):
-                    st.session_state.image_data_store.pop(name, None)
-                    st.session_state.ocr_list = []
-                    st.session_state.search_results = None 
-                    st.session_state.pop("last_files_hash", None)
-                    st.session_state.uploader_key += 1 
-                    st.rerun()
 
     # ==========================================
     # 5. 분석 및 결과 확인 
@@ -128,11 +127,9 @@ with tab1:
             st.subheader("📝 추출된 도서 리스트 (편집 가능)")
             df = pd.DataFrame(st.session_state.ocr_list)
             
-            # 사용자에게는 source_image 컬럼을 숨김 처리
             edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, column_config={"source_image": None})
 
             if st.button("📚 국회도서관 소장 여부 확인 및 결과 생성", use_container_width=True):
-                # 1. 인덱스 초기화 및 중복 행번호 계산
                 work_df = edited_df.reset_index(drop=True)
                 work_df['행번호'] = work_df.index
                 
@@ -145,7 +142,6 @@ with tab1:
                 
                 work_df['중복 행번호'] = work_df.apply(get_duplicate_marker, axis=1)
 
-                # 2. 중복을 제외한 원문만 API 검색
                 unique_queries = first_occurrences['original'].tolist()
                 nal_results_map = {}
                 
@@ -174,7 +170,6 @@ with tab1:
                     
                     progress_bar.progress((i + 1) / len(unique_queries))
 
-                # 3. 전체 행(work_df)을 순회하며 최종 CSV용 데이터프레임 조립
                 final_results = []
                 for idx, row in work_df.iterrows():
                     q = row['original']
@@ -191,7 +186,6 @@ with tab1:
                         "비고": ""
                     })
 
-                # 세션에 최종 결과와 인덱스 추적용 work_df 저장
                 st.session_state.search_results = final_results 
                 st.session_state.final_work_df = work_df
 
@@ -201,7 +195,6 @@ with tab1:
                 res_df = pd.DataFrame(st.session_state.search_results)
                 work_df = st.session_state.final_work_df
                 
-                # 색상 하이라이트 함수 (응답개수가 0이나 에러가 아닐 때 노란색)
                 def highlight_found(row):
                     if str(row['응답개수(소장수)']) not in ['0', '에러']:
                         return ['background-color: #FFF9C4'] * len(row)
@@ -211,14 +204,14 @@ with tab1:
                 st.dataframe(styled_res_df, use_container_width=True)
                 
                 # ==========================================
-                # 6. 다운로드 버튼 섹션 (결과 저장하기 & 사진)
+                # 6. 다운로드 버튼 섹션
                 # ==========================================
                 st.divider()
                 st.subheader("📥 다운로드")
                 
-                current_time = datetime.now().strftime("%m%d%H%M%")
+                # 💡 시간 형식 변경 적용 (마지막 % 제거)
+                current_time = datetime.now().strftime("%m%d%H%M")
                 
-                # 1) CSV 다운로드 버튼
                 csv_bytes = res_df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
                     label="결과 저장하기", 
@@ -231,12 +224,10 @@ with tab1:
                 st.markdown("#### 🖼️ 분석 원본 사진 다운로드")
                 st.write("각 사진이 담당한 CSV 행(Row) 번호가 파일명에 표기됩니다.")
                 
-                # 2) 이미지 개별 다운로드 버튼 (가로로 배치)
                 img_cols = st.columns(4)
                 col_idx = 0
                 
                 for img_name, img_bytes in st.session_state.image_data_store.items():
-                    # 해당 이미지가 생성한 데이터 인덱스(행번호) 찾기
                     img_rows = work_df[work_df['source_image'] == img_name]
                     
                     if not img_rows.empty:
@@ -244,7 +235,6 @@ with tab1:
                         end_idx = img_rows.index.max()
                         new_img_name = f"nal{current_time}_{start_idx}_{end_idx}.jpg"
                     else:
-                        # 이미지는 올렸으나 추출된 책이 없는 경우
                         new_img_name = f"nal{current_time}_none_{img_name.split('.')[0]}.jpg"
                     
                     with img_cols[col_idx % 4]:
