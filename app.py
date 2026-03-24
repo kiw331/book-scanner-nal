@@ -216,7 +216,7 @@ with tab1:
                 st.divider()
                 st.subheader("📥 다운로드")
                 
-                current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                current_time = datetime.now().strftime("%m%d%H%M%")
                 
                 # 1) CSV 다운로드 버튼
                 csv_bytes = res_df.to_csv(index=False).encode('utf-8-sig')
