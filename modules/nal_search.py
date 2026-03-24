@@ -33,7 +33,7 @@ def parse_and_sort_nal_response(xml_content, search_query):
             tag_name = item.findtext('name')
             tag_value = clean_html_tags(item.findtext('value'))
             
-            if tag_name in ["자료명", "논문명", "서명", "Main Title"]:
+            if tag_name in ["자료명", "논문명", "서명", "Main Title", "기사명"]: # '기사명' 추가
                 title = tag_value
             elif tag_name in ["저자명", "저자", "Author"]:
                 author = tag_value
