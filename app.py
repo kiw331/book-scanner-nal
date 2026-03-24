@@ -50,6 +50,9 @@ if "ocr_list" not in st.session_state:
 if "search_results" not in st.session_state:
     st.session_state.search_results = None
 
+if "uploads" not in st.session_state:
+    st.session_state.uploads = None
+
 # ==========================================
 # 3. 탭 구성 및 각 탭별 메인 로직
 # ==========================================
@@ -66,7 +69,6 @@ with tab1:
         for f in uploaded_files:
             st.session_state.image_data_store[f.name] = f.getvalue()
         st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
-        st.session_state.uploads = ()
 
     # ==========================================
     # 4. 이미지 미리보기 (Image Preview) 
@@ -79,7 +81,7 @@ with tab1:
             st.session_state.image_data_store = {}
             st.session_state.ocr_list = []
             st.session_state.search_results = None 
-            st.session_state.uploads = ()
+            st.session_state.uploads = None
             st.session_state.pop("last_files_hash", None)
             st.rerun()
 
@@ -96,7 +98,7 @@ with tab1:
                     st.session_state.ocr_list = []
                     st.session_state.search_results = None 
                     st.session_state.pop("last_files_hash", None)
-                    st.session_state.uploads = ()
+                    st.session_state.uploads = None
                     st.experimental_rerun()
 
     # ==========================================
