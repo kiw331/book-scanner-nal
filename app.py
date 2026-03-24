@@ -60,11 +60,13 @@ with tab1:
     st.info("💡 **모바일 팁**: 아래 버튼을 누르고 **[카메라]**를 선택해 고화질로 바로 촬영하거나, 갤러리에서 기존 사진을 고를 수 있습니다.")
     uploaded_files = st.file_uploader("사진을 선택하거나 촬영하세요 (여러 장 가능)", 
                                       type=['jpg', 'jpeg', 'png'], 
-                                      accept_multiple_files=True)
+                                      accept_multiple_files=True,
+                                      key="uploads")
     if uploaded_files:
         for f in uploaded_files:
             st.session_state.image_data_store[f.name] = f.getvalue()
         st.success(f"{len(uploaded_files)}장의 사진이 대기열에 추가되었습니다.")
+        st.session_state.uploads = ()
 
     # ==========================================
     # 4. 이미지 미리보기 (Image Preview) 
@@ -77,16 +79,25 @@ with tab1:
             st.session_state.image_data_store = {}
             st.session_state.ocr_list = []
             st.session_state.search_results = None 
+            st.session_state.uploads = ()
+            st.session_state.pop("last_files_hash", None)
             st.rerun()
 
         cols = st.columns(5)
-        for i, (name, data) in enumerate(st.session_state.image_data_store.items()):
+        for i, (name, data) in enumerate(list(st.session_state.image_data_store.items())):
             with cols[i % 5]:
                 try:
                     img = Image.open(io.BytesIO(data))
                     st.image(img, caption=name, use_container_width=True)
                 except Exception as e:
                     st.error(f"{name} 로드 실패: {e}")
+                if st.button("사진 삭제", key=f"delete_{name}"):
+                    st.session_state.image_data_store.pop(name, None)
+                    st.session_state.ocr_list = []
+                    st.session_state.search_results = None 
+                    st.session_state.pop("last_files_hash", None)
+                    st.session_state.uploads = ()
+                    st.experimental_rerun()
 
     # ==========================================
     # 5. 분석 및 결과 확인 
