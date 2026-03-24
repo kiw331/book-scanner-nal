@@ -160,7 +160,7 @@ with tab1:
                         unique_books = unique_books[:1]
                         
                         nal_results_map[query] = {
-                            "소장수": count,
+                            "응답수": count,
                             "국회도서관 확인명": "\n".join([b["title"] for b in unique_books]) if unique_books else "정보 없음",
                             "저자": "\n".join([b["author"] for b in unique_books]) if unique_books else "정보 없음",
                             "발행처": "\n".join([b["publisher"] for b in unique_books]) if unique_books else "정보 없음"
@@ -178,7 +178,7 @@ with tab1:
                     final_results.append({
                         "원문": q,
                         "번역": row.get('display', ''),
-                        "응답개수": nal_data.get("소장수", "에러"),
+                        "응답수": nal_data.get("응답수", "에러"),
                         "국회도서관 확인명": nal_data.get("국회도서관 확인명", "-"),
                         "저자": nal_data.get("저자", "-"),
                         "발행처": nal_data.get("발행처", "-"),
@@ -196,7 +196,7 @@ with tab1:
                 work_df = st.session_state.final_work_df
                 
                 def highlight_found(row):
-                    if str(row['응답개수(소장수)']) not in ['0', '에러']:
+                    if str(row['응답수']) not in ['0', '에러']:
                         return ['background-color: #FFF9C4'] * len(row)
                     return [''] * len(row)
                 
